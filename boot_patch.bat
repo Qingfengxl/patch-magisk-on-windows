@@ -1,5 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
+set adb=tools\platform-tools\adb.exe
 set magiskboot=tools\magiskboot\magiskboot.exe
 set busybox=tools\busybox\busybox.exe
 set bootimage=%1
@@ -36,26 +37,102 @@ echo  - 遇到问题无法继续...
 pause
 exit /b 1
 
+:make_config
+if defined ARCH ( echo "ARCH=!ARCH!">config.txt
+) else (
+echo "ARCH=">config.txt
+)
+if defined ARCH32 ( echo "ARCH32=!ARCH32!">>config.txt
+) else (
+echo "ARCH32=">>config.txt
+)
+if defined IS64BIT ( echo "IS64BIT=!IS64BIT!">>config.txt
+) else (
+echo "IS64BIT=ture/false">>config.txt
+)
+if defined KEEPVERITY ( echo "KEEPVERITY=!KEEPVERITY!">>config.txt
+) else (
+echo "KEEPVERITY=">>config.txt
+)
+if defined KEEPFORCEENCRYPT ( echo "KEEPFORCEENCRYPT=!KEEPFORCEENCRYPT!">>config.txt
+) else (
+echo "KEEPFORCEENCRYPT=">>config.txt
+)
+goto :eof
+
 :: 修补镜像
 :patch
-echo  - Windows版只能手动进行flag的设置不能自动读取...
+for /F %%i in ('!adb! get-state') do set state=%%i
+if /I "!state!"=="device" (
+echo  - 检测到连接到了安卓设备...
+echo  - 正在从设备中获取配置信息...
+for /F %%i in ('adb shell getprop ro.product.cpu.abi') do (
+set abi=%%i
+if /I "!abi:~0,5!"=="arm64" (
+set "ARCH=arm64"
+set "ARCH32=arm"
+set "IS64BIT=true"
+)
+if /I "!abi:~0,7!"=="armeabi" (
+set "ARCH=arm"
+set "ARCH32=arm"
+set "IS64BIT=false"
+)
+if /I "!abi:~0,3!"=="x86" (
+set "ARCH=x86"
+set "ARCH32=x86"
+set "IS64BIT=false"
+)
+if /I "!abi:~0,6!"=="x86_64" (
+set "ARCH=x64"
+set "ARCH32=x86"
+set "IS64BIT=true"
+)
+)
+for /F %%i in ('adb shell getprop ro.build.system_root_image') do set sar=%%i
+if "!sar!"=="true" ( set "KEEPVERITY=1"
+) else (
+set "KEEPVERITY=1"
+) 
+for /F %%i in ('adb shell getprop ro.crypto.state') do set encrypt=%%i
+if "!encrypt!"=="unencrypted" ( set "KEEPFORCEENCRYPT=0"
+) else (
+set "KEEPFORCEENCRYPT=1"
+) 
+echo  - 检测信息完整程度...
+for /F %%i in ('type config.txt') do set %%i
+if not defined ARCH echo  - 错误，配置错误，请自行输入配置信息...&pause&call :make_config
+if not defined ARCH32 echo  - 错误，配置错误，请自行输入配置信息...&pause&call :make_config
+if not defined IS64BIT echo  - 错误，配置错误，请自行输入配置信息...&pause&call :make_config
+if not defined KEEPVERITY echo  - 错误，配置错误，请自行输入配置信息...&pause&call :make_config
+if not defined KEEPFORCEENCRYPT echo  - 错误，配置错误，请自行输入配置信息...&pause&call :make_config
+) else (
+echo  - 由于你没有连接手机，不能自动读取设备信息，只能手动进行flag的设置...
 echo  - 请手动修改工作目录下config.txt文件后并单击任意键继续...
 timeout /t 3 /nobreak > nul
-echo "ARCH=arm64">config.txt
-echo "ARCH32=arm">>config.txt
-echo "IS64BIT=true">>config.txt
-echo "KEEPVERITY=1">>config.txt
-echo "KEEPFORCEENCRYPT=1">>config.txt
+call :make_config
 notepad config.txt
 pause>nul
+)
 :: 设置变量
-for /f %%i in ('type config.txt') do set %%i
+if exist "config.txt" for /f %%i in ('type config.txt') do set %%i
 echo  - 你的设置为：
 echo               ARCH:%ARCH%
 echo               ARCH32:%ARCH32%
 echo               IS64BIT:%IS64BIT%
 echo               KEEPVERITY:%KEEPVERITY%
 echo               KEEPFORCEENCRYPT:%KEEPFORCEENCRYPT%
+echo  - 准备文件
+if /I "!ARCH32!"=="arm" (
+copy "arm\magiskinit" "magiskinit"
+copy "arm\magisk32" "magisk32"
+copy "arm\magisk64" "magisk64"
+)
+if /I "!ARCH32!"=="x86" (
+copy "x86\magiskinit" "magiskinit"
+copy "x86\magisk32" "magisk32"
+copy "x86\magisk64" "magisk64"
+)
 echo  - 开始修补boot.img
 timeout /t 3 /nobreak > nul
 echo  - 解包boot...
@@ -113,4 +190,20 @@ if exist "kernel" (
 )
 echo  - 正在打包boot...
 !magiskboot! --repack !bootimage!
+!magiskboot! --cleanup
+if exist new-boot.img (
+echo  - 文件生成成功！
+echo  - 检测patch情况...
+!magiskboot! --unpack new-boot.img
+!magiskboot! --cpio ramdisk.cpio test
+if "!errorlevel!"=="1" ( echo  - 检测到magisk 修补...
+) else (
+echo  - 未检测到magisk 修补...
+)
+!magiskboot! --cleanup
+if exist "magiskinit" del /q "magiskinit"
+if exist "magisk32" del /q "magisk32"
+if exist "magisk64" del /q "magisk64"
+if exist "config.txt" del /q "config.txt"
+)
 pause

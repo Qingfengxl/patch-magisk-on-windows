@@ -9,5 +9,5 @@ this pre-built magiskboot download form google search result some website and it
 thank you who built this magiskboot
 thank you!!!
 
-# It will only work some non-sar devices
+# It will only working on some non-sar devices
   tested on my Xiaomi 5X (tiffany) MIUI 12 android 9 ported form MistyRain...
